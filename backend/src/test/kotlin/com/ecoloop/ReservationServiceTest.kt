@@ -39,6 +39,16 @@ class ReservationServiceTest {
         val stranger get() = users[2]
         suspend fun request(amount: String = "4.00", user: UUID = receiver) = UUID.fromString(service.create(user, ReservationCreate(listing.toString(), kg(amount))).id)
         suspend fun stock() = catalog.detail(listing).availableKg
+        fun assertProjection(reservation: ReservationDto) {
+            assertEquals(listing.toString(), reservation.listingId)
+            assertEquals(supplier.toString(), reservation.supplierId)
+            assertEquals(receiver.toString(), reservation.receiverId)
+            assertEquals("Kain perca", reservation.listingTitle)
+            assertEquals("Kain Perca", reservation.categoryName)
+            assertEquals("Jakarta Selatan", reservation.listingDistrict)
+            assertEquals("User 1", reservation.supplierName)
+            assertEquals("User 2", reservation.receiverName)
+        }
         suspend fun expect(code: String, block: suspend () -> Unit) {
             val error = assertFailsWith<ApiException> { block() }
             assertEquals(code, error.code)
@@ -67,6 +77,64 @@ class ReservationServiceTest {
             expect("FORBIDDEN") { service.feedback(supplier, UUID.fromString(transfer.id), FeedbackRequest("USED")) }
             assertEquals("USED", service.feedback(receiver, UUID.fromString(transfer.id), FeedbackRequest("USED")).status)
             assertEquals("STORED", service.feedback(receiver, UUID.fromString(transfer.id), FeedbackRequest("STORED")).status)
+        }
+    }
+
+    @Test fun `reservation projections are populated across the complete lifecycle`() = runBlocking {
+        fixture {
+            val created = service.create(receiver, ReservationCreate(listing.toString(), kg("4.00")))
+            assertProjection(created)
+            assertNull(created.transferId)
+            val id = UUID.fromString(created.id)
+            assertProjection(service.list(supplier, "incoming").single())
+            assertProjection(service.list(receiver, "outgoing").single())
+            assertTrue(service.list(stranger, "incoming").isEmpty())
+            assertProjection(service.approve(supplier, id))
+            val token = service.handover(receiver, id).token
+            assertProjection(repository.transaction { reservation(id)!! })
+            val transfer = service.complete(supplier, id, CompleteRequest(token, kg("3.80")))
+            val completed = service.list(receiver, "outgoing").single()
+            assertProjection(completed)
+            assertEquals("COMPLETED", completed.status)
+            assertEquals(transfer.id, completed.transferId)
+
+            val rejected = service.reject(supplier, request())
+            assertProjection(rejected)
+            assertEquals("REJECTED", rejected.status)
+            val cancelledId = request()
+            assertProjection(service.approve(supplier, cancelledId))
+            val cancelled = service.cancel(receiver, cancelledId)
+            assertProjection(cancelled)
+            assertEquals("CANCELLED", cancelled.status)
+            service.list(supplier, "incoming").forEach(::assertProjection)
+        }
+    }
+
+    @Test fun `projections reflect current listing category location and participant names`() = runBlocking {
+        fixture {
+            val id = request()
+            val patched = catalog.patch(supplier, listing, ListingPatch(
+                categoryId = "00000000-0000-0000-0000-000000000002",
+                title = "Kardus untuk kerajinan",
+                district = "Jakarta Barat"
+            ))
+            assertEquals("Kardus Bersih", patched.categoryName)
+            assertEquals("Kardus Bersih", catalog.detail(listing).categoryName)
+            repository.transaction {
+                updateProfile(supplier, ProfilePatch(name = "UMKM Kardus"))
+                updateProfile(receiver, ProfilePatch(name = "Komunitas Kreatif"))
+            }
+            val projected = service.list(receiver, "outgoing").single()
+            assertEquals("Kardus untuk kerajinan", projected.listingTitle)
+            assertEquals("Kardus Bersih", projected.categoryName)
+            assertEquals("Jakarta Barat", projected.listingDistrict)
+            assertEquals("UMKM Kardus", projected.supplierName)
+            assertEquals("Komunitas Kreatif", projected.receiverName)
+            val approved = service.approve(supplier, id)
+            assertEquals(projected.listingTitle, approved.listingTitle)
+            assertEquals(projected.categoryName, approved.categoryName)
+            assertEquals(projected.supplierName, approved.supplierName)
+            assertEquals(projected.receiverName, approved.receiverName)
         }
     }
 

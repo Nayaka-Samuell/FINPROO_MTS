@@ -30,10 +30,38 @@ object DecimalSerializer : KSerializer<BigDecimal> {
 @Serializable data class CategoryDto(val id: String, val name: String, val unit: String)
 @Serializable data class ListingCreate(val categoryId: String, val title: String, val description: String, val totalKg: BigDecimal, val district: String, val photos: List<String> = emptyList())
 @Serializable data class ListingPatch(val categoryId: String? = null, val title: String? = null, val description: String? = null, val totalKg: BigDecimal? = null, val district: String? = null, val status: String? = null, val photos: List<String>? = null)
-@Serializable data class ListingDto(val id: String, val supplierId: String, val categoryId: String, val title: String, val description: String, val totalKg: BigDecimal, val availableKg: BigDecimal, val district: String, val status: String, val photos: List<String>)
+@Serializable data class ListingDto(
+    val id: String,
+    val supplierId: String,
+    val categoryId: String,
+    val title: String,
+    val description: String,
+    val totalKg: BigDecimal,
+    val availableKg: BigDecimal,
+    val district: String,
+    val status: String,
+    val photos: List<String>,
+    val categoryName: String = "Kategori"
+)
 @Serializable data class ListingPage(val items: List<ListingDto>, val page: Int, val limit: Int, val total: Long)
 @Serializable data class ReservationCreate(val listingId: String, val requestedKg: BigDecimal)
-@Serializable data class ReservationDto(val id: String, val listingId: String, val receiverId: String, val supplierId: String, val requestedKg: BigDecimal, val reservedKg: BigDecimal, val status: String, val createdAt: String, val updatedAt: String, val transferId: String? = null)
+@Serializable data class ReservationDto(
+    val id: String,
+    val listingId: String,
+    val receiverId: String,
+    val supplierId: String,
+    val requestedKg: BigDecimal,
+    val reservedKg: BigDecimal,
+    val status: String,
+    val createdAt: String,
+    val updatedAt: String,
+    val transferId: String? = null,
+    val listingTitle: String = "Material",
+    val categoryName: String = "Kategori",
+    val listingDistrict: String = "Jakarta",
+    val supplierName: String = "Penyedia",
+    val receiverName: String = "Penerima"
+)
 @Serializable data class TokenDto(val token: String, val expiresAt: String)
 @Serializable data class CompleteRequest(val handoverToken: String, val actualKg: BigDecimal)
 @Serializable data class TransferDto(val id: String, val reservationId: String, val actualKg: BigDecimal, val completedAt: String, val status: String = "COMPLETED")

@@ -74,6 +74,14 @@ Create mengembalikan 201; aksi/read/update 200. Validasi 400, auth 401, izin 403
 | GET 🔒 | `/impact/me` | `{totalKg,transferCount,suppliedKg,receivedKg}` dari transfer COMPLETED |
 | POST 🔒 | `/transfers/{id}/feedback` | Receiver; `status`: USED (digunakan), STORED (disimpan), UNUSED (tidak terpakai). Upsert laporan terbaru |
 
+### Proyeksi data EcoLoop 2.0
+
+- Semua respons `ListingDto` (katalog, detail, create, patch, delete) menyertakan `categoryName` dari tabel kategori.
+- `ReservationDto` menyertakan `listingTitle`, `categoryName`, `listingDistrict`, `supplierName`, dan `receiverName`. Repository mengambil proyeksi melalui join listing, kategori, dan dua alias user; tidak memerlukan fetch detail per reservasi dari Android. Nilainya mengikuti data terbaru, bukan snapshot saat reservasi dibuat.
+- Proyeksi yang sama dipakai pada create, incoming/outgoing, approve, reject, cancel, serta pembacaan internal handover/complete. Respons handover tetap `{token,expiresAt}`, dan complete tetap `TransferDto`; refresh GET reservasi setelah complete untuk memperoleh proyeksi berstatus COMPLETED dan `transferId`.
+- Filter katalog harus mengirim `categoryId` berupa UUID dari GET `/categories`, misalnya `/api/v1/listings?categoryId=00000000-0000-0000-0000-000000000002`. Filter ini dapat digabung dengan `district`, `q`, `page`, dan `limit`. Nama kategori bukan ID yang valid (400); UUID yang tidak ditemukan menghasilkan daftar kosong.
+- Perubahan ini hanya menambah field respons; tidak memerlukan migrasi database. Query proyeksi user hanya memilih nama, bukan password hash atau email.
+
 ### Contoh alur
 
 ```bash

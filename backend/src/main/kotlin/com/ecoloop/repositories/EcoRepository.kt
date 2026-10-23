@@ -43,17 +43,20 @@ class Store {
     }
     fun categories() = Categories.selectAll().orderBy(Categories.name).map { CategoryDto(it[Categories.id].value.toString(), it[Categories.name], it[Categories.unit]) }
     fun categoryExists(id: UUID) = Categories.selectAll().where { Categories.id eq id }.count() > 0
+    private fun listingProjection() = (Listings innerJoin Categories).select(Listings.columns + Categories.name)
     fun listing(id: UUID, lock: Boolean = false): ListingDto? {
-        val query = Listings.selectAll().where { Listings.id eq id }
-        return (if (lock) query.forUpdate() else query).singleOrNull()?.let(::listingDto)
+        // Lock only inventory, not the shared category row joined by the projection.
+        if (lock && Listings.select(Listings.id).where { Listings.id eq id }.forUpdate().singleOrNull() == null) return null
+        return listingProjection().where { Listings.id eq id }.singleOrNull()?.let(::listingDto)
     }
     private fun listingDto(row: ResultRow) = ListingDto(
         row[Listings.id].value.toString(), row[Listings.supplierId].value.toString(), row[Listings.categoryId].value.toString(),
         row[Listings.title], row[Listings.description], row[Listings.totalKg], row[Listings.availableKg], row[Listings.district], row[Listings.status],
-        ListingPhotos.selectAll().where { ListingPhotos.listingId eq row[Listings.id] }.orderBy(ListingPhotos.sortOrder).map { it[ListingPhotos.imageUrl] }
+        ListingPhotos.selectAll().where { ListingPhotos.listingId eq row[Listings.id] }.orderBy(ListingPhotos.sortOrder).map { it[ListingPhotos.imageUrl] },
+        categoryName = row[Categories.name]
     )
     fun listings(categoryId: UUID?, district: String?, q: String?, page: Int, limit: Int): ListingPage {
-        val query = Listings.selectAll().where { Listings.status eq "ACTIVE" }
+        val query = listingProjection().where { Listings.status eq "ACTIVE" }
         categoryId?.let { value -> query.andWhere { Listings.categoryId eq value } }
         district?.let { value -> query.andWhere { Listings.district eq value } }
         q?.let { value ->
@@ -87,17 +90,43 @@ class Store {
         urls.forEachIndexed { index, url -> ListingPhotos.insert { it[listingId] = id; it[imageUrl] = url; it[sortOrder] = index } }
     }
     fun stock(id: UUID, available: BigDecimal) { Listings.update({ Listings.id eq id }) { it[availableKg] = available } }
+    private val reservationSupplier = Users.alias("reservation_supplier")
+    private val reservationReceiver = Users.alias("reservation_receiver")
+    private fun reservationProjection() = (Reservations innerJoin Listings innerJoin Categories)
+        .join(reservationSupplier, JoinType.INNER, Listings.supplierId, reservationSupplier[Users.id])
+        .join(reservationReceiver, JoinType.INNER, Reservations.receiverId, reservationReceiver[Users.id])
+        .join(Transfers, JoinType.LEFT, Reservations.id, Transfers.reservationId)
+        .select(Reservations.columns + listOf(
+            Listings.supplierId, Listings.title, Listings.district, Categories.name,
+            reservationSupplier[Users.name], reservationReceiver[Users.name], Transfers.id
+        ))
+    fun reservationListingId(id: UUID): UUID? = Reservations.select(Reservations.listingId)
+        .where { Reservations.id eq id }.singleOrNull()?.get(Reservations.listingId)?.value
     fun reservation(id: UUID, lock: Boolean = false): ReservationDto? {
-        val query = Reservations.selectAll().where { Reservations.id eq id }
-        return (if (lock) query.forUpdate() else query).singleOrNull()?.let(::reservationDto)
+        // A separate base-table lock avoids locking users/categories and PostgreSQL's
+        // restriction on FOR UPDATE over the nullable side of a LEFT JOIN (transfers).
+        if (lock && Reservations.select(Reservations.id).where { Reservations.id eq id }.forUpdate().singleOrNull() == null) return null
+        return reservationProjection().where { Reservations.id eq id }.singleOrNull()?.let(::reservationDto)
     }
-    private fun reservationDto(row: ResultRow): ReservationDto {
-        val supplier = Listings.selectAll().where { Listings.id eq row[Reservations.listingId] }.single()[Listings.supplierId]
-        val transfer = Transfers.selectAll().where { Transfers.reservationId eq row[Reservations.id] }.singleOrNull()
-        return ReservationDto(row[Reservations.id].value.toString(), row[Reservations.listingId].value.toString(), row[Reservations.receiverId].value.toString(), supplier.value.toString(), row[Reservations.requestedKg], row[Reservations.reservedKg], row[Reservations.status], row[Reservations.createdAt].iso(), row[Reservations.updatedAt].iso(), transfer?.get(Transfers.id)?.value?.toString())
-    }
+    private fun reservationDto(row: ResultRow) = ReservationDto(
+        id = row[Reservations.id].value.toString(),
+        listingId = row[Reservations.listingId].value.toString(),
+        receiverId = row[Reservations.receiverId].value.toString(),
+        supplierId = row[Listings.supplierId].value.toString(),
+        requestedKg = row[Reservations.requestedKg],
+        reservedKg = row[Reservations.reservedKg],
+        status = row[Reservations.status],
+        createdAt = row[Reservations.createdAt].iso(),
+        updatedAt = row[Reservations.updatedAt].iso(),
+        transferId = row.getOrNull(Transfers.id)?.value?.toString(),
+        listingTitle = row[Listings.title],
+        categoryName = row[Categories.name],
+        listingDistrict = row[Listings.district],
+        supplierName = row[reservationSupplier[Users.name]],
+        receiverName = row[reservationReceiver[Users.name]]
+    )
     fun reservations(user: UUID, incoming: Boolean): List<ReservationDto> {
-        val query = (Reservations innerJoin Listings).selectAll()
+        val query = reservationProjection()
         if (incoming) query.where { Listings.supplierId eq user } else query.where { Reservations.receiverId eq user }
         return query.orderBy(Reservations.createdAt, SortOrder.DESC).map(::reservationDto)
     }

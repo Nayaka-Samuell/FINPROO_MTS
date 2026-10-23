@@ -17,8 +17,8 @@ class ReservationService(private val repository: EcoRepository) {
     private fun hash(value: String) = MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
     /** Shared lock order: listing first, reservation second. Never reverse this order. */
     private fun Store.locked(id: UUID): Pair<ListingDto, ReservationDto> {
-        val found = reservation(id) ?: missing("Reservasi")
-        val listing = listing(uuid(found.listingId), lock = true) ?: missing("Listing")
+        val listingId = reservationListingId(id) ?: missing("Reservasi")
+        val listing = listing(listingId, lock = true) ?: missing("Listing")
         return listing to (reservation(id, lock = true) ?: missing("Reservasi"))
     }
     private fun supplier(user: UUID, listing: ListingDto) { if (listing.supplierId != user.toString()) forbidden() }

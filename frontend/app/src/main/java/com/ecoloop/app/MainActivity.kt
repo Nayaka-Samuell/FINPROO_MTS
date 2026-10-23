@@ -3,139 +3,109 @@ package com.ecoloop.app
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.*
-import androidx.compose.ui.graphics.*
-import androidx.compose.ui.graphics.asImageBitmap
-import android.graphics.Bitmap
-import android.graphics.Color as AndroidColor
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
-import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.*
-import coil.compose.AsyncImage
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.MultiFormatWriter
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
-import retrofit2.Retrofit
 import retrofit2.HttpException
-import com.google.gson.JsonParser
+import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.*
+import com.google.gson.JsonParser
 import java.util.concurrent.TimeUnit
 
 private val android.content.Context.store by preferencesDataStore("ecoloop_session")
 private val TOKEN = stringPreferencesKey("jwt")
-val categories = listOf("Kain Perca", "Kardus Bersih", "Botol Plastik", "Potongan Kayu")
-val districts = listOf("Jakarta Selatan", "Jakarta Pusat", "Jakarta Barat", "Jakarta Timur", "Jakarta Utara")
-
-data class User(val id:String="", val name:String="", val email:String="", val contact:String?=null, val city:String="Jakarta", val district:String="")
-data class Listing(val id:String="", val title:String="Material tersedia", val category:String="Kain Perca", val description:String="", val availableKg:Double=0.0, val totalKg:Double=0.0, val district:String="Jakarta Selatan", val imageUrl:String?=null, val photos:List<String> = emptyList(), val categoryId:String="", val supplier:User?=null) {
- val displayPhoto:String get() = photos.firstOrNull()?.takeIf { it.isNotBlank() } ?: imageUrl?.takeIf { it.isNotBlank() } ?: defaultPhotoForCategory(title,categoryId)
- val displayCategory:String get() = category.takeIf { it.isNotBlank() } ?: categoryNameFor(title,categoryId)
-}
-
-fun defaultPhotoForCategory(title:String,categoryId:String):String {
- val key=("$title $categoryId").lowercase()
- val photo=when {
-  listOf("kain","perca","fabric","textile").any { it in key } -> "photo-1558618666-fcd25c85cd64"
-  listOf("kardus","cardboard","karton").any { it in key } -> "photo-1532996122724-e3c354a0b15b"
-  listOf("botol","bottle","plastik","plastic").any { it in key } -> "photo-1605600659873-d808a13e4d9a"
-  listOf("kayu","wood","timber").any { it in key } -> "photo-1513467655676-561b7d489a88"
-  else -> "photo-1558618666-fcd25c85cd64"
- }
- return "https://images.unsplash.com/$photo?auto=format&fit=crop&w=1200&q=85"
-}
-fun categoryNameFor(title:String,categoryId:String):String {
- val key=("$title $categoryId").lowercase()
- return when {
-  listOf("kain","perca","fabric","textile").any { it in key } -> "Kain Perca"
-  listOf("kardus","cardboard","karton").any { it in key } -> "Kardus Bersih"
-  listOf("botol","bottle","plastik","plastic").any { it in key } -> "Botol Plastik"
-  listOf("kayu","wood","timber").any { it in key } -> "Potongan Kayu"
-  else -> "Material daur ulang"
- }
-}
-data class Reservation(val id:String="", val status:String="REQUESTED", val requestedKg:Double=0.0, val listing:Listing?=null, val receiver:User?=null, val handoverToken:String?=null)
-data class Impact(val totalKg:Double=0.0, val transferCount:Int=0, val suppliedKg:Double=0.0, val receivedKg:Double=0.0)
+val districts=listOf("Jakarta Selatan","Jakarta Pusat","Jakarta Barat","Jakarta Timur","Jakarta Utara")
+data class User(val id:String="",val name:String="",val email:String="",val contact:String?=null,val city:String="DKI Jakarta",val district:String="")
+data class CategoryDto(val id:String,val name:String,val unit:String)
+data class ListingDto(val id:String,val supplierId:String,val categoryId:String,val categoryName:String="Material",val title:String,val description:String,val totalKg:Double,val availableKg:Double,val district:String,val status:String,val photos:List<String> = emptyList()){val displayPhoto:String get()=photos.firstOrNull()?.takeIf{it.isNotBlank()}?:defaultPhotoForCategory(title,categoryId)}
+data class ListingCreateRequest(val categoryId:String,val title:String,val description:String,val totalKg:Double,val district:String,val photos:List<String> = emptyList())
+data class ReservationDto(val id:String,val listingId:String,val receiverId:String,val supplierId:String,val requestedKg:Double,val reservedKg:Double,val status:String,val createdAt:String,val updatedAt:String,val transferId:String?=null,val listingTitle:String="Material",val categoryName:String="Kategori",val listingDistrict:String="Jakarta",val supplierName:String="Penyedia",val receiverName:String="Penerima")
+data class TransferDto(val id:String,val reservationId:String,val actualKg:Double,val completedAt:String,val status:String="COMPLETED")
+data class ImpactDto(val totalKg:Double,val transferCount:Long,val suppliedKg:Double,val receivedKg:Double)
+data class TokenDto(val token:String,val expiresAt:String)
 data class DataResponse<T>(val data:T)
-data class ListingPage(val items:List<Listing> = emptyList(), val page:Int=1, val limit:Int=20, val total:Int=0)
-data class HandoverToken(val token:String="", val expiresAt:String="")
-data class AuthRequest(val email:String, val password:String, val name:String?=null, val city:String?=null, val district:String?=null)
-data class AuthResponse(val token:String="", val user:User?=null)
-data class ReservationRequest(val listingId:String, val requestedKg:Double)
-data class ListingRequest(val title:String,val category:String,val totalKg:Double,val district:String,val description:String,val imageUrl:String)
+data class ListingPage(val items:List<ListingDto> = emptyList(),val page:Int=1,val limit:Int=20,val total:Int=0)
+data class AuthRequest(val email:String,val password:String,val name:String?=null,val city:String?=null,val district:String?=null)
+data class AuthResponse(val token:String="",val user:User?=null)
+data class ReservationRequest(val listingId:String,val requestedKg:Double)
 data class HandoverRequest(val handoverToken:String,val actualKg:Double)
-interface EcoApi {
+fun defaultPhotoForCategory(title:String,categoryId:String):String{val key="$title $categoryId".lowercase();val id=when{listOf("kain","perca","fabric","textile").any{it in key}->"photo-1558618666-fcd25c85cd64";listOf("kardus","cardboard","karton").any{it in key}->"photo-1532996122724-e3c354a0b15b";listOf("botol","bottle","plastik","plastic").any{it in key}->"photo-1602143407151-7111542de6e8";listOf("kayu","wood","timber").any{it in key}->"photo-1513467655676-561b7d489a88";else->"photo-1558618666-fcd25c85cd64"};return "https://images.unsplash.com/$id?auto=format&fit=crop&w=1200&q=85"}
+interface EcoApi{
  @POST("auth/login") suspend fun login(@Body body:AuthRequest):DataResponse<AuthResponse>
  @POST("auth/register") suspend fun register(@Body body:AuthRequest):DataResponse<AuthResponse>
  @GET("me") suspend fun me():DataResponse<User>
- @GET("listings") suspend fun listings(@Query("q") q:String?=null,@Query("category") category:String?=null,@Query("district") district:String?=null):DataResponse<ListingPage>
- @POST("listings") suspend fun addListing(@Body body:ListingRequest):DataResponse<Listing>
- @POST("reservations") suspend fun reserve(@Body body:ReservationRequest):DataResponse<Reservation>
- @GET("reservations") suspend fun reservations(@Query("view") view:String):DataResponse<List<Reservation>>
- @POST("reservations/{id}/approve") suspend fun approve(@retrofit2.http.Path("id") id:String):DataResponse<Reservation>
- @POST("reservations/{id}/reject") suspend fun reject(@retrofit2.http.Path("id") id:String):DataResponse<Reservation>
- @POST("reservations/{id}/handover-token") suspend fun handover(@retrofit2.http.Path("id") id:String):DataResponse<HandoverToken>
- @POST("reservations/{id}/complete") suspend fun complete(@retrofit2.http.Path("id") id:String,@Body body:HandoverRequest):DataResponse<Reservation>
- @GET("impact/me") suspend fun impact():DataResponse<Impact>
+ @GET("categories") suspend fun categories():DataResponse<List<CategoryDto>>
+ @GET("listings") suspend fun listings(@Query("q") q:String?=null,@Query("categoryId") categoryId:String?=null,@Query("district") district:String?=null):DataResponse<ListingPage>
+ @GET("listings/{id}") suspend fun detail(@Path("id") id:String):DataResponse<ListingDto>
+ @POST("listings") suspend fun addListing(@Body body:ListingCreateRequest):DataResponse<ListingDto>
+ @POST("reservations") suspend fun reserve(@Body body:ReservationRequest):DataResponse<ReservationDto>
+ @GET("reservations") suspend fun reservations(@Query("view") view:String):DataResponse<List<ReservationDto>>
+ @POST("reservations/{id}/approve") suspend fun approve(@Path("id") id:String):DataResponse<ReservationDto>
+ @POST("reservations/{id}/reject") suspend fun reject(@Path("id") id:String):DataResponse<ReservationDto>
+ @POST("reservations/{id}/handover-token") suspend fun handover(@Path("id") id:String):DataResponse<TokenDto>
+ @POST("reservations/{id}/complete") suspend fun complete(@Path("id") id:String,@Body body:HandoverRequest):DataResponse<TransferDto>
+ @GET("impact/me") suspend fun impact():DataResponse<ImpactDto>
 }
-class EcoRepository(private val context:android.content.Context) {
- private val client=OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
-  val token=runCatching { kotlinx.coroutines.runBlocking { context.store.data.first()[TOKEN] } }.getOrNull()
-  chain.proceed(chain.request().newBuilder().apply { if(!token.isNullOrBlank()) addHeader("Authorization","Bearer $token") }.build())
- }).connectTimeout(15,TimeUnit.SECONDS).build()
- val api:EcoApi=Retrofit.Builder().baseUrl(BuildConfig.BASE_URL).client(client).addConverterFactory(GsonConverterFactory.create()).build().create(EcoApi::class.java)
- suspend fun saveToken(token:String){context.store.edit { it[TOKEN]=token }}
- suspend fun clear(){context.store.edit { it.remove(TOKEN) }}
- suspend fun hasToken()=context.store.data.first()[TOKEN]!=null
-}
+class EcoRepository(private val context:android.content.Context){private val client=OkHttpClient.Builder().addInterceptor(Interceptor{chain->val token=runCatching{kotlinx.coroutines.runBlocking{context.store.data.first()[TOKEN]}}.getOrNull();chain.proceed(chain.request().newBuilder().apply{if(!token.isNullOrBlank())addHeader("Authorization","Bearer $token")}.build())}).connectTimeout(15,TimeUnit.SECONDS).build();val api:EcoApi=Retrofit.Builder().baseUrl(BuildConfig.BASE_URL).client(client).addConverterFactory(GsonConverterFactory.create()).build().create(EcoApi::class.java);suspend fun saveToken(t:String){context.store.edit{it[TOKEN]=t}};suspend fun clear(){context.store.edit{it.remove(TOKEN)}};suspend fun hasToken()=context.store.data.first()[TOKEN]!=null}
 class EcoViewModel(private val repo:EcoRepository):ViewModel(){
- private val _list=MutableStateFlow<List<Listing>>(emptyList()); val list=_list.asStateFlow()
- private val _incoming=MutableStateFlow<List<Reservation>>(emptyList()); val incoming=_incoming.asStateFlow()
- private val _outgoing=MutableStateFlow<List<Reservation>>(emptyList()); val outgoing=_outgoing.asStateFlow()
- private val _impact=MutableStateFlow(Impact()); val impact=_impact.asStateFlow()
- private val _user=MutableStateFlow<User?>(null); val user=_user.asStateFlow()
- private val _error=MutableStateFlow<String?>(null); val error=_error.asStateFlow()
- private val _authenticated=MutableStateFlow(false); val authenticated=_authenticated.asStateFlow()
- init { viewModelScope.launch { _authenticated.value=repo.hasToken(); if(_authenticated.value){runCatching{_user.value=repo.api.me().data}; refresh()} } }
- fun run(block:suspend()->Unit){viewModelScope.launch { _error.value=null; runCatching { block() }.onFailure { e -> _error.value=if(e is HttpException) parseApiError(e) else (e.message ?: "Terjadi kendala. Coba lagi.") } } }
- private fun parseApiError(e:HttpException):String { val body=runCatching{e.response()?.errorBody()?.string()}.getOrNull(); val message=runCatching{JsonParser.parseString(body).asJsonObject.getAsJsonObject("error").get("message")?.asString}.getOrNull(); return message ?: when(e.code()){401->"Sesi tidak valid atau telah berakhir. Silakan masuk kembali.";403->"Anda tidak memiliki izin untuk melakukan tindakan ini.";404->"Data tidak ditemukan.";409->"Data berubah atau stok tidak mencukupi. Muat ulang dan coba lagi.";else->"Permintaan gagal (${e.code()}). Silakan coba lagi."} }
- fun auth(email:String,password:String,name:String?=null,district:String?=null,register:Boolean=false){run { val r=if(register)repo.api.register(AuthRequest(email,password,name,"DKI Jakarta",district)) else repo.api.login(AuthRequest(email,password)); if(r.data.token.isBlank()) error("Token tidak diterima dari server.");repo.saveToken(r.data.token);_user.value=r.data.user?:repo.api.me().data;_authenticated.value=true;refresh() }}
- fun logout(){run{repo.clear();_authenticated.value=false;_user.value=null}}
- fun refresh(){run { _list.value=repo.api.listings().data.items; _incoming.value=repo.api.reservations("incoming").data;_outgoing.value=repo.api.reservations("outgoing").data;_impact.value=repo.api.impact().data }}
- fun search(q:String,category:String?,district:String?){run{_list.value=repo.api.listings(q.ifBlank{null},category,district).data.items}}
- fun reserve(item:Listing,kg:Double)=run { require(kg>0&&kg<=item.availableKg) { "Berat harus lebih dari 0 dan tidak melebihi stok." };repo.api.reserve(ReservationRequest(item.id,kg));refresh() }
- fun listing(r:ListingRequest)=run{repo.api.addListing(r);refresh()}
- fun approve(id:String,yes:Boolean)=run{if(yes)repo.api.approve(id) else repo.api.reject(id);refresh()}
- fun handover(id:String,done:(String)->Unit)=run{done(repo.api.handover(id).data.token);refresh()}
- fun complete(id:String,token:String,kg:Double)=run{repo.api.complete(id,HandoverRequest(token,kg));refresh()}
+ private val _categories=MutableStateFlow<List<CategoryDto>>(emptyList());val categories=_categories.asStateFlow();private val _list=MutableStateFlow<List<ListingDto>>(emptyList());val list=_list.asStateFlow();private val _loading=MutableStateFlow(true);val loading=_loading.asStateFlow();private val _incoming=MutableStateFlow<List<ReservationDto>>(emptyList());val incoming=_incoming.asStateFlow();private val _outgoing=MutableStateFlow<List<ReservationDto>>(emptyList());val outgoing=_outgoing.asStateFlow();private val _impact=MutableStateFlow(ImpactDto(0.0,0,0.0,0.0));val impact=_impact.asStateFlow();private val _user=MutableStateFlow<User?>(null);val user=_user.asStateFlow();private val _error=MutableStateFlow<String?>(null);val error=_error.asStateFlow();private val _busy=MutableStateFlow(false);val busy=_busy.asStateFlow();private val _authenticated=MutableStateFlow(false);val authenticated=_authenticated.asStateFlow()
+ init{viewModelScope.launch{_authenticated.value=repo.hasToken();runCatching{_categories.value=repo.api.categories().data};if(_authenticated.value){runCatching{_user.value=repo.api.me().data};refreshNow()}}}
+ private fun friendly(e:Throwable):String{if(e !is HttpException)return e.message?:"Terjadi kendala. Coba lagi.";val message=runCatching{JsonParser.parseString(e.response()?.errorBody()?.string()).asJsonObject.getAsJsonObject("error").get("message")?.asString}.getOrNull();return message?:when(e.code()){401->"Sesi tidak valid. Silakan masuk kembali.";403->"Anda tidak memiliki izin untuk tindakan ini.";404->"Data tidak ditemukan.";409->"Stok atau status reservasi telah berubah.";else->"Permintaan gagal. Silakan coba lagi."}}
+ private fun action(block:suspend()->Unit){viewModelScope.launch{_error.value=null;_busy.value=true;try{block()}catch(e:Throwable){_error.value=friendly(e)}finally{_busy.value=false}}}
+ fun auth(email:String,password:String,name:String?=null,district:String?=null,register:Boolean=false)=action{val result=(if(register)repo.api.register(AuthRequest(email,password,name,"DKI Jakarta",district))else repo.api.login(AuthRequest(email,password))).data;check(result.token.isNotBlank()){"Token tidak diterima."};repo.saveToken(result.token);_user.value=result.user?:repo.api.me().data;_authenticated.value=true;refreshNow()}
+ fun logout()=action{repo.clear();_authenticated.value=false;_user.value=null}
+ fun refresh()=action{refreshNow()}
+ private suspend fun refreshNow(){_loading.value=true;try{_list.value=repo.api.listings().data.items;_incoming.value=repo.api.reservations("incoming").data;_outgoing.value=repo.api.reservations("outgoing").data;_impact.value=repo.api.impact().data}finally{_loading.value=false}}
+ fun search(q:String,categoryId:String?,district:String?)=action{_loading.value=true;_list.value=repo.api.listings(q.ifBlank{null},categoryId,district).data.items;_loading.value=false}
+ suspend fun loadDetail(id:String)=repo.api.detail(id).data
+ fun reserve(item:ListingDto,kg:Double,success:()->Unit={})=action{require(kg>0&&kg<=item.availableKg){"Masukkan berat lebih dari 0 dan tidak melebihi stok."};repo.api.reserve(ReservationRequest(item.id,kg));refreshNow();success()}
+ fun addListing(body:ListingCreateRequest)=action{repo.api.addListing(body);refreshNow()}
+ fun approve(id:String,yes:Boolean)=action{if(yes)repo.api.approve(id)else repo.api.reject(id);refreshNow()}
+ fun handover(id:String,onToken:(TokenDto)->Unit)=action{onToken(repo.api.handover(id).data)}
+ fun complete(id:String,token:String,kg:Double,onSuccess:()->Unit={})=action{require(token.isNotBlank()&&kg>0){"Token dan berat aktual wajib diisi."};repo.api.complete(id,HandoverRequest(token,kg));refreshNow();onSuccess()}
 }
-class MainActivity:ComponentActivity(){override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);setContent { MaterialTheme(colorScheme=lightColorScheme(primary=Color(0xFF167A57),secondary=Color(0xFFB9DCCB),background=Color(0xFFF6F8F4))) { val context= LocalContext.current; val vm:EcoViewModel= viewModel(factory=object:androidx.lifecycle.ViewModelProvider.Factory{override fun <T:ViewModel> create(c:Class<T>):T=EcoViewModel(EcoRepository(context)) as T}); EcoApp(vm) } } }}
-
+private val ecoColors=lightColorScheme(primary=Color(0xFF176347),onPrimary=Color.White,primaryContainer=Color(0xFFDCEFE3),onPrimaryContainer=Color(0xFF20332B),secondary=Color(0xFF278665),background=Color(0xFFF4F8F4),surface=Color.White,onBackground=Color(0xFF20332B),onSurface=Color(0xFF20332B))
+@Composable fun EcoLoopTheme(content: @Composable () -> Unit) { MaterialTheme(colorScheme=ecoColors,shapes=Shapes(medium=RoundedCornerShape(16.dp),large=RoundedCornerShape(22.dp)),content=content) }
+class MainActivity:ComponentActivity(){override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);setContent{EcoLoopTheme{val context=LocalContext.current;val vm:EcoViewModel=viewModel(factory=object:androidx.lifecycle.ViewModelProvider.Factory{override fun <T:ViewModel> create(c:Class<T>):T=EcoViewModel(EcoRepository(context)) as T});EcoApp(vm)}}}}
 @Composable fun EcoApp(vm:EcoViewModel){
- val auth by vm.authenticated.collectAsState(); val nav= rememberNavController(); var selected by remember { mutableStateOf<Listing?>(null) }
+ val auth by vm.authenticated.collectAsState()
+ val nav=rememberNavController()
+ var selected by remember{mutableStateOf<ListingDto?>(null)}
  if(!auth){AuthScreen(vm);return}
- val routes=listOf("home","activity","add","impact","profile"); val labels=listOf("Beranda","Aktivitas","Tambah","Dampak","Profil"); val icons=listOf(Icons.Default.Home,Icons.Default.List,Icons.Default.Add,Icons.Default.Insights,Icons.Default.Person)
- Scaffold(bottomBar={NavigationBar { routes.forEachIndexed { i,r -> NavigationBarItem(selected=nav.currentDestination?.route==r,onClick={nav.navigate(r){popUpTo("home");launchSingleTop=true}},icon={Icon(icons[i],null)},label={Text(labels[i])}) } }}) { padding -> NavHost(nav,"home",Modifier.padding(padding)){ composable("home"){HomeScreen(vm){selected=it;nav.navigate("detail")}}; composable("detail"){selected?.let{DetailScreen(it,vm)}};composable("activity"){ActivityScreen(vm)};composable("add"){AddListingScreen(vm)};composable("impact"){ImpactScreen(vm)};composable("profile"){ProfileScreen(vm)} } }
+ val routes=listOf("home","activity","impact","profile")
+ val labels=listOf("Beranda","Aktivitas","Dampak","Profil")
+ val icons=listOf(Icons.Default.Home,Icons.Default.List,Icons.Default.Insights,Icons.Default.Person)
+ Scaffold(
+  bottomBar={NavigationBar { routes.forEachIndexed { index, route -> NavigationBarItem(selected=nav.currentDestination?.route==route,onClick={nav.navigate(route){popUpTo("home");launchSingleTop=true}},icon={Icon(icons[index],null)},label={Text(labels[index])}) } }},
+  floatingActionButton={if(nav.currentDestination?.route=="home") FloatingActionButton(onClick={nav.navigate("add")}) { Icon(Icons.Default.Add,"Bagikan material") }}
+ ) { paddingValues ->
+  NavHost(navController=nav,startDestination="home",modifier=Modifier.padding(paddingValues)) {
+   composable("home"){HomeScreen(vm,{selected=it;nav.navigate("detail")},{nav.navigate("add")})}
+   composable("detail"){selected?.let{DetailScreen(it,vm)}}
+   composable("add"){AddListingScreen(vm)}
+   composable("activity"){ActivityScreen(vm)}
+   composable("impact"){ImpactScreen(vm)}
+   composable("profile"){ProfileScreen(vm)}
+  }
+ }
 }
-@Composable private fun AuthScreen(vm:EcoViewModel){var register by remember{mutableStateOf(false)};var name by remember{mutableStateOf("")};var email by remember{mutableStateOf("")};var pass by remember{mutableStateOf("")};var district by remember{mutableStateOf(districts.first())}; Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp),verticalArrangement=Arrangement.Center){Text("EcoLoop",fontSize=36.sp,fontWeight=FontWeight.Bold,color=MaterialTheme.colorScheme.primary);Text("Material sisa, peluang baru.",color=Color.Gray);Spacer(Modifier.height(28.dp));if(register){Field("Nama",name){name=it};DistrictPicker(district){district=it}};Field("Email",email){email=it};Field("Password",pass,true){pass=it};Button(onClick={vm.auth(email,pass,name,district,register)},Modifier.fillMaxWidth().padding(top=12.dp)){Text(if(register)"Buat akun" else "Masuk")};TextButton(onClick={register=!register}){Text(if(register)"Sudah punya akun? Masuk" else "Belum punya akun? Daftar")};ErrorText(vm)} }
-@Composable private fun HomeScreen(vm:EcoViewModel,onSelect:(Listing)->Unit){val list by vm.list.collectAsState();var query by remember{mutableStateOf("")};var cat by remember{mutableStateOf<String?>(null)};var area by remember{mutableStateOf<String?>(null)};Column(Modifier.fillMaxSize().padding(horizontal=18.dp)){Text("Temukan material",fontSize=27.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(top=20.dp));Text("Beri bahan sisa kesempatan kedua.",color=Color.Gray);OutlinedTextField(query,{query=it;vm.search(query,cat,area)},Modifier.fillMaxWidth().padding(top=14.dp),placeholder={Text("Cari kain, kardus, botol...")},leadingIcon={Icon(Icons.Default.Search,null)},singleLine=true);Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical=8.dp)){(listOf("Semua")+categories).forEach{FilterChip(selected=(if(it=="Semua")cat==null else cat==it),onClick={cat=if(it=="Semua")null else it;vm.search(query,cat,area)},label={Text(it)},modifier=Modifier.padding(end=6.dp))}};Row(Modifier.horizontalScroll(rememberScrollState())){FilterChip(selected=area==null,onClick={area=null;vm.search(query,cat,area)},label={Text("Semua kecamatan")});districts.forEach{FilterChip(selected=area==it,onClick={area=it;vm.search(query,cat,area)},label={Text(it)},modifier=Modifier.padding(start=5.dp))}};LazyColumn(contentPadding=PaddingValues(vertical=12.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){items(list){item->ListingCard(item){onSelect(item)}}} };ErrorText(vm) }
-@Composable private fun ListingCard(item:Listing,onClick:()->Unit){Card(onClick=onClick,Modifier.fillMaxWidth(),shape=RoundedCornerShape(18.dp)){Column{AsyncImage(model=item.displayPhoto,contentDescription=item.title,contentScale=androidx.compose.ui.layout.ContentScale.Crop,modifier=Modifier.fillMaxWidth().height(170.dp));Column(Modifier.padding(16.dp)){Text(item.displayCategory.uppercase(),color=MaterialTheme.colorScheme.primary,fontSize=12.sp,fontWeight=FontWeight.Bold);Text(item.title,fontSize=20.sp,fontWeight=FontWeight.SemiBold);Text("${item.district} · %.2f kg tersedia".format(item.availableKg),color=Color.Gray)}}} }
-@Composable private fun DetailScreen(item:Listing,vm:EcoViewModel){var show by remember{mutableStateOf(false)};var kg by remember{mutableStateOf("")};Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)){ListingCard(item){};Spacer(Modifier.height(16.dp));Text("Tentang material",fontSize=20.sp,fontWeight=FontWeight.Bold);Text(item.description.ifBlank{"Material ini siap dimanfaatkan kembali."},Modifier.padding(vertical=8.dp));Text("Penyedia: ${item.supplier?.name?:"Komunitas EcoLoop"}");Button(onClick={show=true},Modifier.fillMaxWidth().padding(top=24.dp)){Text("Ajukan Reservasi")}};if(show)AlertDialog(onDismissRequest={show=false},title={Text("Ajukan reservasi")},text={Column{Text("Stok tersedia ${item.availableKg} kg");OutlinedTextField(kg,{kg=it},label={Text("Berat yang dibutuhkan (kg)")})}},confirmButton={TextButton(onClick={kg.toDoubleOrNull()?.let{vm.reserve(item,it);show=false}}){Text("Kirim permintaan")}},dismissButton={TextButton(onClick={show=false}){Text("Batal")}});ErrorText(vm)}
+@Composable private fun AuthScreen(vm:EcoViewModel){var register by remember{mutableStateOf(false)};var name by remember{mutableStateOf("")};var email by remember{mutableStateOf("")};var password by remember{mutableStateOf("")};var district by remember{mutableStateOf(districts.first())};Column(Modifier.fillMaxSize().padding(28.dp),verticalArrangement=Arrangement.Center){Text("EcoLoop",fontSize=36.sp,fontWeight=FontWeight.Bold,color=MaterialTheme.colorScheme.primary);Text("Bahan sisa, peluang baru.");Spacer(Modifier.height(20.dp));if(register){EcoField("Nama",name){name=it};DistrictPicker(district){district=it}};EcoField("Email",email){email=it};EcoField("Password",password,true){password=it};val busy by vm.busy.collectAsState();EcoPrimaryButton(if(register)"Buat akun" else "Masuk",busy){vm.auth(email,password,name,district,register)};TextButton(onClick={register=!register}){Text(if(register)"Sudah punya akun? Masuk" else "Belum punya akun? Daftar")};ErrorText(vm)}}

@@ -13,10 +13,10 @@ class ApiTest {
     private suspend fun HttpResponse.json() = Json.parseToJsonElement(bodyAsText()).jsonObject
     private suspend fun HttpResponse.data() = json().getValue("data").jsonObject
     private fun JsonObject.string(key: String) = getValue(key).jsonPrimitive.content
-    private suspend fun ApplicationTestBuilder.register(email: String): Pair<String, String> {
+    private suspend fun ApplicationTestBuilder.register(email: String, name: String = "Eco User"): Pair<String, String> {
         val response = client.post("/api/v1/auth/register") {
             contentType(ContentType.Application.Json)
-            setBody("""{"name":"Eco User","email":"$email","password":"password123","city":"DKI Jakarta","district":"Jakarta Selatan"}""")
+            setBody("""{"name":"$name","email":"$email","password":"password123","city":"DKI Jakarta","district":"Jakarta Selatan"}""")
         }
         assertEquals(HttpStatusCode.Created, response.status, response.bodyAsText())
         val data = response.data()
@@ -62,8 +62,8 @@ class ApiTest {
 
     @Test fun `full API flow returns inventory transfers feedback and impact`() = testApplication {
         application { module(env()) }
-        val (supplier, _) = register("supplier@example.com")
-        val (receiver, _) = register("receiver@example.com")
+        val (supplier, _) = register("supplier@example.com", "Penyedia Kain")
+        val (receiver, _) = register("receiver@example.com", "Pengrajin")
         val categoryResponse = client.get("/api/v1/categories")
         assertEquals(4, categoryResponse.json().getValue("data").jsonArray.size)
         val listing = client.post("/api/v1/listings") {
@@ -72,17 +72,29 @@ class ApiTest {
         }
         assertEquals(HttpStatusCode.Created, listing.status, listing.bodyAsText())
         val listingId = listing.data().string("id")
+        assertEquals("Kain Perca", listing.data().string("categoryName"))
+        fun assertProjection(data: JsonObject) {
+            assertEquals("Kain perca bersih", data.string("listingTitle"))
+            assertEquals("Kain Perca", data.string("categoryName"))
+            assertEquals("Jakarta Selatan", data.string("listingDistrict"))
+            assertEquals("Penyedia Kain", data.string("supplierName"))
+            assertEquals("Pengrajin", data.string("receiverName"))
+        }
         val reservation = client.post("/api/v1/reservations") {
             bearerAuth(receiver); contentType(ContentType.Application.Json); setBody("""{"listingId":"$listingId","requestedKg":4.00}""")
         }
         assertEquals(HttpStatusCode.Created, reservation.status, reservation.bodyAsText())
         val reservationId = reservation.data().string("id")
         assertEquals("REQUESTED", reservation.data().string("status"))
+        assertProjection(reservation.data())
+        assertFalse(reservation.bodyAsText().contains("password"))
         val denied = client.post("/api/v1/reservations/$reservationId/approve") { bearerAuth(receiver) }
         assertEquals(HttpStatusCode.Forbidden, denied.status)
-        assertEquals(HttpStatusCode.OK, client.post("/api/v1/reservations/$reservationId/approve") { bearerAuth(supplier) }.status)
+        val approved = client.post("/api/v1/reservations/$reservationId/approve") { bearerAuth(supplier) }
+        assertEquals(HttpStatusCode.OK, approved.status)
+        assertProjection(approved.data())
         val incoming = client.get("/api/v1/reservations?view=incoming") { bearerAuth(supplier) }
-        assertEquals(1, incoming.json().getValue("data").jsonArray.size)
+        assertProjection(incoming.json().getValue("data").jsonArray.single().jsonObject)
         val tokenResponse = client.post("/api/v1/reservations/$reservationId/handover-token") { bearerAuth(receiver) }
         val handoverToken = tokenResponse.data().string("token")
         val complete = client.post("/api/v1/reservations/$reservationId/complete") {
@@ -90,6 +102,12 @@ class ApiTest {
         }
         assertEquals(HttpStatusCode.OK, complete.status, complete.bodyAsText())
         val transferId = complete.data().string("id")
+        assertEquals(reservationId, complete.data().string("reservationId"))
+        val outgoing = client.get("/api/v1/reservations?view=outgoing") { bearerAuth(receiver) }
+        val completedReservation = outgoing.json().getValue("data").jsonArray.single().jsonObject
+        assertProjection(completedReservation)
+        assertEquals("COMPLETED", completedReservation.string("status"))
+        assertEquals(transferId, completedReservation.string("transferId"))
         val stock = client.get("/api/v1/listings/$listingId").data().getValue("availableKg").jsonPrimitive.content.toBigDecimal()
         assertEquals("6.20".toBigDecimal(), stock)
         val impact = client.get("/api/v1/impact/me") { bearerAuth(supplier) }
@@ -101,6 +119,55 @@ class ApiTest {
         assertEquals(HttpStatusCode.OK, feedback.status, feedback.bodyAsText())
         assertEquals("USED", feedback.data().string("status"))
         assertEquals(HttpStatusCode.OK, client.delete("/api/v1/listings/$listingId") { bearerAuth(supplier) }.status)
+    }
+
+    @Test fun `listing category UUID filter and projections work with other filters and pagination`() = testApplication {
+        application { module(env()) }
+        val (supplier, _) = register("supplier@example.com")
+        val categories = client.get("/api/v1/categories").json().getValue("data").jsonArray.map { it.jsonObject }
+        suspend fun create(category: JsonObject, district: String, title: String): String {
+            val response = client.post("/api/v1/listings") {
+                bearerAuth(supplier); contentType(ContentType.Application.Json)
+                setBody("""{"categoryId":"${category.string("id")}","title":"$title","description":"Material non-B3","totalKg":2.50,"district":"$district"}""")
+            }
+            assertEquals(HttpStatusCode.Created, response.status, response.bodyAsText())
+            assertEquals(category.string("name"), response.data().string("categoryName"))
+            return response.data().string("id")
+        }
+        categories.forEach { create(it, "Jakarta Selatan", "Material ${it.string("name")}") }
+        val cardboard = categories.single { it.string("name") == "Kardus Bersih" }
+        val cardboardId = cardboard.string("id")
+        val westId = create(cardboard, "Jakarta Barat", "Kardus khusus kerajinan")
+        val inactiveId = create(cardboard, "Jakarta Selatan", "Kardus tidak aktif")
+        assertEquals(HttpStatusCode.OK, client.delete("/api/v1/listings/$inactiveId") { bearerAuth(supplier) }.status)
+
+        suspend fun browse(vararg filters: Pair<String, String>): JsonObject {
+            val response = client.get("/api/v1/listings") { url { filters.forEach { (key, value) -> parameters.append(key, value) } } }
+            assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
+            return response.data()
+        }
+        val all = browse()
+        assertEquals(5, all.getValue("items").jsonArray.size)
+        categories.forEach { category ->
+            val page = browse("categoryId" to category.string("id"))
+            val expected = if (category == cardboard) 2 else 1
+            assertEquals(expected, page.string("total").toInt())
+            assertEquals(expected, page.getValue("items").jsonArray.size)
+            page.getValue("items").jsonArray.forEach {
+                assertEquals(category.string("id"), it.jsonObject.string("categoryId"))
+                assertEquals(category.string("name"), it.jsonObject.string("categoryName"))
+            }
+        }
+        val first = browse("categoryId" to cardboardId, "limit" to "1", "page" to "1")
+        val second = browse("categoryId" to cardboardId, "limit" to "1", "page" to "2")
+        assertEquals("2", first.string("total"))
+        assertEquals("2", second.string("total"))
+        assertNotEquals(first.getValue("items").jsonArray.single(), second.getValue("items").jsonArray.single())
+        val combined = browse("categoryId" to cardboardId, "district" to "Jakarta Barat", "q" to "khusus")
+        assertEquals("1", combined.string("total"))
+        assertEquals(westId, combined.getValue("items").jsonArray.single().jsonObject.string("id"))
+        assertEquals("0", browse("categoryId" to UUID.randomUUID().toString()).string("total"))
+        assertEquals(HttpStatusCode.BadRequest, client.get("/api/v1/listings") { url { parameters.append("categoryId", "Kardus Bersih") } }.status)
     }
 
     @Test fun `auth endpoints have IP rate limiting and CORS uses allowlist`() = testApplication {
