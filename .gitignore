@@ -1,0 +1,82 @@
+# ==========================================
+# EcoLoop Git Ignore - Root & Project Wide
+# ==========================================
+
+# 1. Environment & Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+*.jks
+*.keystore
+
+# 2. Database Files & Persistent Storage
+data/
+backend/data/
+*.db
+*.mv.db
+*.trace.db
+*.sqlite
+*.sqlite3
+
+# 3. Android & Local Hardware Properties (Private Paths)
+local.properties
+*/local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# 4. Gradle & Build Artifacts
+.gradle/
+*/.gradle/
+build/
+*/build/
+*/*/build/
+bin/
+out/
+dist/
+
+# 5. Compiled Binaries & Mobile Packages
+*.apk
+*.aab
+*.dex
+*.class
+output-metadata.json
+
+# 6. Kotlin Compiler Caches
+.kotlin/
+*/.kotlin/
+*.kotlin_module
+
+# 7. IDE & Editor Metadata
+.idea/
+*/.idea/
+*.iml
+*/*.iml
+.vscode/
+*.ipr
+*.iws
+
+# 8. Logs & Diagnostic Dumps
+*.log
+*/build-*.log
+*/runtime-smoke.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 9. OS Specific Files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+
+# 10. Agent & Temporary Artifacts
+.pi/
+*/.pi/
+.herdr/
+tmp/
+/tmp/
