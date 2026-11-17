@@ -41,7 +41,8 @@ object DecimalSerializer : KSerializer<BigDecimal> {
     val district: String,
     val status: String,
     val photos: List<String>,
-    val categoryName: String = "Kategori"
+    val categoryName: String = "Kategori",
+    val supplierName: String = "Penyedia"
 )
 @Serializable data class ListingPage(val items: List<ListingDto>, val page: Int, val limit: Int, val total: Long)
 @Serializable data class ReservationCreate(val listingId: String, val requestedKg: BigDecimal)
@@ -60,7 +61,9 @@ object DecimalSerializer : KSerializer<BigDecimal> {
     val categoryName: String = "Kategori",
     val listingDistrict: String = "Jakarta",
     val supplierName: String = "Penyedia",
-    val receiverName: String = "Penerima"
+    val receiverName: String = "Penerima",
+    val actualKg: BigDecimal? = null,
+    val completedAt: String? = null
 )
 @Serializable data class TokenDto(val token: String, val expiresAt: String)
 @Serializable data class CompleteRequest(val handoverToken: String, val actualKg: BigDecimal)

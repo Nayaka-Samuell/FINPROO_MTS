@@ -14,7 +14,7 @@
 *.keystore
 
 # 2. Database Files & Persistent Storage
-data/
+/data/
 backend/data/
 *.db
 *.mv.db

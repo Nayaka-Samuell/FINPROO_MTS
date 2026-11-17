@@ -43,7 +43,10 @@ class Store {
     }
     fun categories() = Categories.selectAll().orderBy(Categories.name).map { CategoryDto(it[Categories.id].value.toString(), it[Categories.name], it[Categories.unit]) }
     fun categoryExists(id: UUID) = Categories.selectAll().where { Categories.id eq id }.count() > 0
-    private fun listingProjection() = (Listings innerJoin Categories).select(Listings.columns + Categories.name)
+    private val listingSupplier = Users.alias("listing_supplier")
+    private fun listingProjection() = (Listings innerJoin Categories)
+        .join(listingSupplier, JoinType.INNER, Listings.supplierId, listingSupplier[Users.id])
+        .select(Listings.columns + Categories.name + listingSupplier[Users.name])
     fun listing(id: UUID, lock: Boolean = false): ListingDto? {
         // Lock only inventory, not the shared category row joined by the projection.
         if (lock && Listings.select(Listings.id).where { Listings.id eq id }.forUpdate().singleOrNull() == null) return null
@@ -53,7 +56,8 @@ class Store {
         row[Listings.id].value.toString(), row[Listings.supplierId].value.toString(), row[Listings.categoryId].value.toString(),
         row[Listings.title], row[Listings.description], row[Listings.totalKg], row[Listings.availableKg], row[Listings.district], row[Listings.status],
         ListingPhotos.selectAll().where { ListingPhotos.listingId eq row[Listings.id] }.orderBy(ListingPhotos.sortOrder).map { it[ListingPhotos.imageUrl] },
-        categoryName = row[Categories.name]
+        categoryName = row[Categories.name],
+        supplierName = row[listingSupplier[Users.name]]
     )
     fun listings(categoryId: UUID?, district: String?, q: String?, page: Int, limit: Int): ListingPage {
         val query = listingProjection().where { Listings.status eq "ACTIVE" }
@@ -98,7 +102,7 @@ class Store {
         .join(Transfers, JoinType.LEFT, Reservations.id, Transfers.reservationId)
         .select(Reservations.columns + listOf(
             Listings.supplierId, Listings.title, Listings.district, Categories.name,
-            reservationSupplier[Users.name], reservationReceiver[Users.name], Transfers.id
+            reservationSupplier[Users.name], reservationReceiver[Users.name], Transfers.id, Transfers.actualKg, Transfers.completedAt
         ))
     fun reservationListingId(id: UUID): UUID? = Reservations.select(Reservations.listingId)
         .where { Reservations.id eq id }.singleOrNull()?.get(Reservations.listingId)?.value
@@ -123,7 +127,9 @@ class Store {
         categoryName = row[Categories.name],
         listingDistrict = row[Listings.district],
         supplierName = row[reservationSupplier[Users.name]],
-        receiverName = row[reservationReceiver[Users.name]]
+        receiverName = row[reservationReceiver[Users.name]],
+        actualKg = row.getOrNull(Transfers.actualKg),
+        completedAt = row.getOrNull(Transfers.completedAt)?.iso()
     )
     fun reservations(user: UUID, incoming: Boolean): List<ReservationDto> {
         val query = reservationProjection()

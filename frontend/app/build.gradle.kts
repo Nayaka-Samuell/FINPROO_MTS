@@ -7,10 +7,33 @@ plugins {
 android {
     namespace = "com.ecoloop.app"
     compileSdk = 35
-    defaultConfig { applicationId = "com.ecoloop.app"; minSdk = 26; targetSdk = 35; versionCode = 1; versionName = "1.0"; buildConfigField("String", "BASE_URL", "\"${project.findProperty("BASE_URL") ?: "http://192.168.10.101:8080/api/v1/"}\"") }
-    buildFeatures { compose = true; buildConfig = true }
-    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
-    kotlinOptions { jvmTarget = "17" }
+
+    defaultConfig {
+        applicationId = "com.ecoloop.app"
+        minSdk = 26
+        targetSdk = 35
+        versionCode = 2
+        versionName = "2.0"
+
+        // Default: emulator Android (10.0.2.2 = localhost komputer).
+        // HP fisik: ./gradlew assembleDebug -PBASE_URL=http://<IP-LAN>:8080/api/v1/
+        val baseUrl = (project.findProperty("BASE_URL") as String?) ?: "http://10.0.2.2:8080/api/v1/"
+        buildConfigField("String", "BASE_URL", "\"$baseUrl\"")
+    }
+
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
 }
 
 dependencies {

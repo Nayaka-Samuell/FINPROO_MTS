@@ -82,15 +82,34 @@ Finpro MTS LEC/
 │   └── gradlew.bat
 │
 ├── frontend/                      # Android Native Application (Kotlin)
-│   ├── app/src/main/
-│   │   ├── java/com/ecoloop/app/
-│   │   │   ├── MainActivity.kt    # Single Activity, App Scaffold, Navigation
-│   │   │   └── Screens.kt         # Jetpack Compose Screens (Material 3)
-│   │   └── AndroidManifest.xml    # Permissions (Camera, Internet, Cleartext)
-│   ├── app/build.gradle.kts       # Android Compose, Retrofit, CameraX, ZXing
-│   ├── build.gradle.kts
+│   ├── app/src/main/java/com/ecoloop/app/
+│   │   ├── MainActivity.kt        # Single Activity → EcoLoopRoot
+│   │   ├── EcoLoopApplication.kt  # Membuat AppContainer sekali per proses
+│   │   ├── AppContainer.kt        # Dependency container sederhana (session, API, repository)
+│   │   ├── data/
+│   │   │   ├── remote/            # EcoApi (Retrofit), ApiClient (OkHttp + interceptor), dto/
+│   │   │   ├── local/             # SessionStore: JWT di DataStore + cache token di memori
+│   │   │   └── repository/        # Auth/Catalog/Reservation repository, pesan error, DataChanges
+│   │   ├── ui/
+│   │   │   ├── theme/             # Color, Type, Theme (Material 3, palet EcoLoop 2.0)
+│   │   │   ├── components/        # EcoPrimaryButton, EcoField, EcoStatusBadge, EcoMaterialCard,
+│   │   │   │                      # CategoryArt, EcoEmptyState, ErrorPanel, Skeleton, Messenger
+│   │   │   ├── navigation/        # Routes + EcoNavHost (bottom bar, FAB, snackbar)
+│   │   │   ├── EcoLoopRoot.kt     # Splash → Login → Aplikasi (berdasarkan status sesi)
+│   │   │   ├── UiState.kt         # sealed UiState: Loading / Success / Error
+│   │   │   └── Formatters.kt      # Format kg & tanggal, validasi berat
+│   │   └── feature/               # Satu folder per fitur, masing-masing Screen + ViewModel
+│   │       ├── auth/  home/  detail/  listing/
+│   │       ├── activity/          # + scan/QrScanner.kt (CameraX + ML Kit), HandoverQrCode.kt
+│   │       └── impact/  profile/
+│   ├── app/build.gradle.kts       # Compose, Retrofit, DataStore, CameraX, ML Kit, ZXing
 │   └── gradlew.bat
 │
+├── database/
+│   ├── ecoloop_dump.sql           # pg_dump PostgreSQL berisi data contoh
+│   └── seed.ps1                   # Script pengisi data contoh lewat REST API
+├── docs/
+│   └── Final_Report_EcoLoop.md    # Draft laporan akhir
 ├── .gitignore                     # Filter rahasia, binary, database & file lokal
 └── README.md
 ```
@@ -99,6 +118,8 @@ Finpro MTS LEC/
 
 ## 🚀 4. Panduan Menjalankan Proyek (Local Development)
 
+> **Anggota tim baru?** Baca dulu [`docs/PANDUAN_TIM.md`](docs/PANDUAN_TIM.md). Isinya: peta kode ("mau ubah X, buka file Y"), alur demo pakai akun contoh, cara menambah fitur, dan aturan kerja bareng pakai Git.
+
 ### Prasyarat Lingkungan:
 * **JDK:** Versi 17 atau 21 LTS (disarankan).
 * **Android Studio:** Versi Ladybug / Koala atau yang lebih baru dengan Android SDK API 34/35.
@@ -106,39 +127,92 @@ Finpro MTS LEC/
 
 ---
 
-### A. Menjalankan Backend (Ktor API)
+### A. Menyiapkan PostgreSQL (Docker)
 
-Backend telah dilengkapi database **H2 tersemat dalam mode kompatibilitas PostgreSQL**, sehingga dapat langsung dijalankan tanpa perlu menginstal atau menyalakan PostgreSQL secara manual.
+```powershell
+docker run -d --name ecoloop-postgres `
+  -e POSTGRES_DB=ecoloop -e POSTGRES_USER=ecoloop -e POSTGRES_PASSWORD=<password-lokal> `
+  -p 5432:5432 postgres:16-alpine
+```
 
-1. Buka terminal dan masuk ke folder `backend`:
-   ```bash
-   cd backend
-   .\gradlew.bat run
-   ```
-2. Tunggu hingga muncul log:
-   ```
-   INFO  io.ktor.server.Application - Responding at http://0.0.0.0:8080
-   ```
-3. API siap digunakan di `http://localhost:8080/api/v1/`.
+Flyway membuat seluruh tabel otomatis saat backend pertama kali dijalankan. Untuk langsung memakai data contoh, import dump (lihat bagian C).
 
-*(Jika ingin menggunakan PostgreSQL eksternal/Docker, cukup set environment variable `DB_URL`, `DB_USER`, dan `DB_PASSWORD` sebelum menjalankan `.\gradlew.bat run`).*
+> Tanpa Docker? Lewati langkah ini. Jika `DB_URL` tidak diset, backend otomatis memakai **H2 file lokal (mode PostgreSQL)** di `backend/data/`.
 
 ---
 
-### B. Menjalankan Frontend (Android Studio)
+### B. Menjalankan Backend (Ktor API)
 
-1. Buka **Android Studio**.
-2. Pilih menu **File > Open...**, lalu arahkan ke folder:  
-   `Finpro MTS LEC/frontend`
-3. Tunggu hingga proses **Gradle Sync** selesai di status bar bawah.
-4. Pilih target perangkat:
-   * **Emulator:** Gunakan **Pixel 9 Pro (API 35)** untuk kestabilan grafis terbaik.
-   * **HP Android Fisik:** Hubungkan HP via kabel USB dengan opsi **USB Debugging** aktif.
-5. Klik tombol hijau **Run ▶** (atau tekan `Shift + F10`).
-6. Aplikasi **EcoLoop** akan langsung terpasang dan berjalan di perangkat.
+```powershell
+cd backend
+$env:DB_URL = "jdbc:postgresql://localhost:5432/ecoloop"
+$env:DB_USER = "ecoloop"
+$env:DB_PASSWORD = "<password-lokal>"
+$env:JWT_SECRET = "<string-acak-minimal-32-karakter>"   # opsional di development
+.\gradlew.bat run
+```
 
-> **Catatan Jaringan Real Device:**  
-> Jika menguji menggunakan HP fisik via Wi-Fi, pastikan HP dan Laptop berada di jaringan Wi-Fi yang sama, dan `BASE_URL` di `app/build.gradle.kts` disetel mengarah ke alamat IPv4 Wi-Fi laptop Anda (misal `http://192.168.10.101:8080/api/v1/`).
+Tunggu log `Responding at http://127.0.0.1:8080`. API siap di `http://localhost:8080/api/v1/`.
+
+> Tanpa `JWT_SECRET`, backend membuat secret acak setiap kali start, sehingga token lama menjadi tidak valid. Aplikasi Android menangani ini otomatis: respons **401** menghapus token lalu kembali ke layar login.
+
+```powershell
+.\gradlew.bat test      # pengujian HTTP, aturan bisnis, konkurensi (H2 in-memory)
+```
+
+---
+
+### C. Import / Export Database Contoh
+
+`database/ecoloop_dump.sql` berisi skema + data contoh: **2 akun**, **6 listing di 4 kategori**, **1 transaksi COMPLETED** (3,8 kg kain perca) dan 1 reservasi REQUESTED.
+
+| Akun demo | Peran | Password |
+| :--- | :--- | :--- |
+| `sari@ecoloop.demo` | Penyedia, Jakarta Selatan | `password123` |
+| `budi@ecoloop.demo` | Penerima, Jakarta Timur | `password123` |
+
+**Import** (container `ecoloop-postgres` sudah berjalan; dump memakai `--clean --if-exists`, jadi tabel lama ditimpa):
+
+```powershell
+docker cp database/ecoloop_dump.sql ecoloop-postgres:/tmp/ecoloop_dump.sql
+docker exec ecoloop-postgres psql -U ecoloop -d ecoloop -v ON_ERROR_STOP=1 -f /tmp/ecoloop_dump.sql
+```
+
+Import dengan `psql` dari dalam container (versi 16) agar cocok dengan versi `pg_dump` yang membuat file.
+
+**Isi ulang data lewat API** (database kosong, backend berjalan):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File database\seed.ps1
+```
+
+**Export ulang** setelah data berubah:
+
+```powershell
+docker exec ecoloop-postgres pg_dump -U ecoloop -d ecoloop --no-owner --no-privileges --clean --if-exists -f /tmp/ecoloop_dump.sql
+docker cp ecoloop-postgres:/tmp/ecoloop_dump.sql database/ecoloop_dump.sql
+```
+
+---
+
+### D. Menjalankan Frontend (Android)
+
+1. Buka **Android Studio** → **File > Open...** → folder `Finpro MTS LEC/frontend`, tunggu **Gradle Sync**.
+2. Jalankan backend (bagian B), lalu klik **Run ▶** di emulator.
+
+`BASE_URL` default adalah **`http://10.0.2.2:8080/api/v1/`**. Alamat `10.0.2.2` di emulator Android mengarah ke `localhost` komputer.
+
+**HP fisik** (HP dan laptop di Wi-Fi yang sama): override lewat properti Gradle, tanpa mengubah kode.
+
+```powershell
+cd frontend
+.\gradlew.bat assembleDebug -PBASE_URL=http://192.168.1.10:8080/api/v1/
+.\gradlew.bat installDebug  -PBASE_URL=http://192.168.1.10:8080/api/v1/
+```
+
+Di Android Studio, isi `BASE_URL=http://<IP-LAN>:8080/api/v1/` di `~/.gradle/gradle.properties` (jangan di file proyek). Pastikan firewall Windows mengizinkan port 8080.
+
+**Uji alur QR:** login sebagai `budi@…` di satu perangkat → Aktivitas → Keluar → *Tampilkan QR*. Login sebagai `sari@…` di perangkat lain → Aktivitas → Masuk → *Scan QR*. Kalau kamera tidak tersedia (mis. emulator), pakai *Masukkan token manual*.
 
 ---
 
@@ -153,16 +227,22 @@ Semua respons sukses dibungkus dalam format standar `{"data": ...}` dan error da
 | `GET` | `/api/v1/me` | Otentikasi | Mengambil profil pengguna yang sedang login |
 | `PATCH` | `/api/v1/me` | Otentikasi | Memperbarui profil pengguna |
 | `GET` | `/api/v1/categories` | Publik | Daftar 4 kategori material sirkular |
-| `GET` | `/api/v1/listings` | Publik | Katalog material (filter `q`, `category`, `district`) |
+| `GET` | `/api/v1/listings` | Publik | Katalog ACTIVE (filter `q`, `categoryId`, `district`, `page`, `limit`) |
+| `GET` | `/api/v1/listings/{id}` | Publik | Detail listing (termasuk `categoryName`, `supplierName`, `photos`) |
 | `POST` | `/api/v1/listings` | Otentikasi | Penyedia memposting listing material baru |
+| `PATCH` | `/api/v1/listings/{id}` | Otentikasi | Penyedia mengubah listing miliknya |
+| `DELETE` | `/api/v1/listings/{id}` | Otentikasi | Soft delete (status INACTIVE) |
 | `POST` | `/api/v1/reservations` | Otentikasi | Penerima mengajukan reservasi material (kg) |
-| `GET` | `/api/v1/reservations` | Otentikasi | Riwayat reservasi (`?view=incoming` atau `outgoing`) |
+| `GET` | `/api/v1/reservations` | Otentikasi | Riwayat reservasi (`?view=incoming` atau `outgoing`); transaksi selesai menyertakan `actualKg` & `completedAt` |
 | `POST` | `/api/v1/reservations/{id}/approve` | Otentikasi | Penyedia menyetujui reservasi & mengunci stok |
 | `POST` | `/api/v1/reservations/{id}/reject` | Otentikasi | Penyedia menolak permintaan reservasi |
 | `POST` | `/api/v1/reservations/{id}/cancel` | Otentikasi | Pembatalan reservasi & pengembalian kuota stok |
 | `POST` | `/api/v1/reservations/{id}/handover-token` | Otentikasi | Penerima membuat token QR sekali pakai |
 | `POST` | `/api/v1/reservations/{id}/complete` | Otentikasi | Penyedia menyelesaikan serah terima fisik |
 | `GET` | `/api/v1/impact/me` | Otentikasi | Statistik kg tersalurkan & metrik SDG 12.5 |
+| `POST` | `/api/v1/transfers/{id}/feedback` | Otentikasi | Penerima melaporkan pemakaian (`USED`/`STORED`/`UNUSED`) |
+
+Detail payload, kode error, dan aturan bisnis lengkap ada di [`backend/README.md`](backend/README.md).
 
 ---
 
@@ -179,8 +259,12 @@ File `.gitignore` di repositori ini telah dikonfigurasi secara ketat untuk mence
 ## 👥 7. Tim Pengembang & Kontribusi
 
 Proyek ini dikembangkan oleh **Tim 5 — Mobile Technology Solution (MTS LEC)**:
-* **Captain Nayaka** & Tim Engineering EcoLoop.
-* **Arsitektur:** Clean Architecture, Unidirectional Data Flow, Zero-Trust Security Policy.
+| Nama | NIM | Peran / Kontribusi |
+| :--- | :--- | :--- |
+| _[nama]_ | _[NIM]_ | _[peran]_ |
+| _[nama]_ | _[NIM]_ | _[peran]_ |
+| _[nama]_ | _[NIM]_ | _[peran]_ |
+| _[nama]_ | _[NIM]_ | _[peran]_ |
 
 ---
 *EcoLoop — Memberi Bahan Sisa Kesempatan Kedua untuk Bumi yang Berkelanjutan.* 🌍🌱
