@@ -80,3 +80,11 @@ ehthumbs.db
 .herdr/
 tmp/
 /tmp/
+
+# 11. Private Docs & Personal Skill Files (local only)
+*.pdf
+*.txt
+nayaka-master-skill.md
+*-skill.md
+.claude/
+CLAUDE.md
