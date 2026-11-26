@@ -123,12 +123,3 @@ _[Opsional: kaitkan juga dengan SDG 11.6 (pengelolaan sampah kota) bila relevan.
 
 ---
 
-## 6. AI Disclosure
-
-> _[Diisi oleh tim. Jelaskan secara jujur:]_
-> - _[Tools AI apa saja yang dipakai (nama tool dan model).]_
-> - _[Bagian mana yang dibantu AI: kode, desain, dokumentasi, laporan.]_
-> - _[Bagian mana yang dikerjakan tim sendiri.]_
-> - _[Bagaimana tim memeriksa dan menguji hasil dari AI.]_
-
-_[isi di sini]_
